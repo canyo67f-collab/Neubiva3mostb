@@ -16,7 +16,7 @@ local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 local isSpinning = false
 
 -- Скорость вращения (30 оборотов в секунду = 10800 градусов/сек)
-local ROTATION_SPEED = 30 -- оборотов в секунду
+local ROTATION_SPEED = 10 -- оборотов в секунду
 
 -- Функция для остановки вращения (сбрасываем соединение с RunService)
 local spinConnection = nil
