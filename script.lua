@@ -1,73 +1,25 @@
 --[[
-    Скрипт: Визуальное вращение персонажа (НЕ мешает бегу)
+    Скрипт: Быстрое вращение персонажа
     Управление: Клавиша X (Вкл/Выкл)
 --]]
 
+-- Проверяем, существует ли сервис ввода (для Roblox)
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
-local Players = game:GetService("Players")
 
-local player = Players.LocalPlayer
-local camera = workspace.CurrentCamera
+-- Игрок и его персонаж
+local player = game.Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoidRootPart = character:WaitForChild("HumanoidRootPart")
 
+-- Статус вращения (выкл)
 local isSpinning = false
-local ROTATION_SPEED = 8 -- оборотов в секунду (можно менять)
-local spinConnection = nil
 
--- Эффекты вращения (чисто визуальные)
-local function startSpin()
-    if spinConnection then 
-        spinConnection:Disconnect()
-        spinConnection = nil
-    end
-    
-    isSpinning = true
-    
-    spinConnection = RunService.RenderStepped:Connect(function(deltaTime)
-        if not isSpinning then return end
-        
-        local character = player.Character
-        if not character then return end
-        
-        -- Получаем части тела для визуального вращения
-        local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-        local humanoid = character:FindFirstChild("Humanoid")
-        
-        if not humanoidRootPart or not humanoid then return end
-        
-        -- СПОСОБ 1: Вращаем ТОЛЬКО визуальный угол (не трогаем CFrame)
-        -- Это не влияет на физику и движение!
-        local rotationAngle = (ROTATION_SPEED * deltaTime * 360) % 360
-        
-        -- Применяем вращение только к Orientation (визуалка)
-        -- ВНИМАНИЕ: Это не сломает движение, так как CFrame остаётся нетронутым
-        local currentOrientation = humanoidRootPart.Orientation
-        humanoidRootPart.Orientation = Vector3.new(
-            currentOrientation.X,
-            (currentOrientation.Y + (ROTATION_SPEED * deltaTime * 360)) % 360,
-            currentOrientation.Z
-        )
-        
-        -- Дополнительно: вращаем все конечности для эффекта
-        local limbs = {
-            "UpperTorso", "LowerTorso", "Head",
-            "LeftUpperArm", "RightUpperArm",
-            "LeftLowerArm", "RightLowerArm"
-        }
-        
-        for _, limbName in pairs(limbs) do
-            local limb = character:FindFirstChild(limbName)
-            if limb and limb:IsA("BasePart") then
-                local limbOrientation = limb.Orientation
-                limb.Orientation = Vector3.new(
-                    limbOrientation.X,
-                    (limbOrientation.Y + (ROTATION_SPEED * deltaTime * 360)) % 360,
-                    limbOrientation.Z
-                )
-            end
-        end
-    end)
-end
+-- Скорость вращения (30 оборотов в секунду = 10800 градусов/сек)
+local ROTATION_SPEED = 30 -- оборотов в секунду
+
+-- Функция для остановки вращения (сбрасываем соединение с RunService)
+local spinConnection = nil
 
 local function stopSpin()
     if spinConnection then
@@ -75,54 +27,57 @@ local function stopSpin()
         spinConnection = nil
     end
     isSpinning = false
-    
-    -- Сбрасываем вращение частей тела обратно в ноль (опционально)
-    local character = player.Character
-    if character then
-        local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
-        if humanoidRootPart then
-            humanoidRootPart.Orientation = Vector3.new(0, 0, 0)
-        end
-        
-        local limbs = {
-            "UpperTorso", "LowerTorso", "Head",
-            "LeftUpperArm", "RightUpperArm",
-            "LeftLowerArm", "RightLowerArm"
-        }
-        
-        for _, limbName in pairs(limbs) do
-            local limb = character:FindFirstChild(limbName)
-            if limb and limb:IsA("BasePart") then
-                limb.Orientation = Vector3.new(0, 0, 0)
-            end
-        end
-    end
 end
 
--- Обработка нажатия X
+local function startSpin()
+    -- Если уже крутимся, сначала остановим старый поток, чтобы не было 2х потоков сразу
+    if spinConnection then stopSpin() end
+    
+    isSpinning = true
+    
+    -- Запускаем вращение через Heartbeat (привязано к частоте кадров)
+    spinConnection = RunService.Heartbeat:Connect(function(deltaTime)
+        if not isSpinning then return end
+        
+        -- Проверяем, существует ли персонаж и его часть
+        local currentChar = player.Character
+        if not currentChar then return end
+        
+        local rootPart = currentChar:FindFirstChild("HumanoidRootPart")
+        if not rootPart then return end
+        
+        -- Вычисляем угол поворота за этот кадр
+        -- deltaTime - время между кадрами (обычно ~0.016 сек)
+        local rotationAngle = ROTATION_SPEED * deltaTime * 360 -- в градусах
+        local rotationRadians = math.rad(rotationAngle)
+        
+        -- Применяем вращение (ось Y - вертикальная, чтобы крутиться вокруг своей оси)
+        rootPart.CFrame = rootPart.CFrame * CFrame.Angles(0, rotationRadians, 0)
+    end)
+end
+
+-- Обработка нажатия клавиши X
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    -- Игнорируем, если чат открыт или игра обрабатывает ввод
     if gameProcessed then return end
     
+    -- Проверяем клавишу X
     if input.KeyCode == Enum.KeyCode.X then
         if isSpinning then
             stopSpin()
-            print("❌ Вращение ОСТАНОВЛЕНО")
+            print("Вращение ОСТАНОВЛЕНО")
         else
             startSpin()
-            print("✅ Вращение ЗАПУЩЕНО (Скорость: " .. ROTATION_SPEED .. " об/сек)")
-            print("🏃 Теперь можно БЕГАТЬ и вращаться одновременно!")
+            print("Вращение ЗАПУЩЕНО (Скорость: 30 об/сек)")
         end
     end
 end)
 
--- Если персонаж пересоздаётся
-player.CharacterAdded:Connect(function()
+-- Если персонаж умирает или пересоздается, сбрасываем вращение
+player.CharacterAdded:Connect(function(newCharacter)
     stopSpin()
     isSpinning = false
+    humanoidRootPart = newCharacter:WaitForChild("HumanoidRootPart")
 end)
 
-print("=":rep(40))
-print("🎡 СКРИПТ ВРАЩЕНИЯ ЗАГРУЖЕН")
-print("📌 Нажми X чтобы начать/остановить вращение")
-print("🏃 Движение и бег РАБОТАЮТ во время вращения")
-print("=":rep(40))
+print("Скрипт загружен! Нажми X, чтобы начать бешено крутиться.")
