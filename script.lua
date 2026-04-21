@@ -10,7 +10,7 @@ local Players = game:GetService("Players")
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
-local isSpinning = false
+local isSpinning = true
 local ROTATION_SPEED = 5 -- оборотов в секунду
 local spinConnection = nil
 
