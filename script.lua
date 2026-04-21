@@ -1,5 +1,5 @@
 --[[
-    Скрипт: Вращение персонажа (работает с Shift Lock + не мешает движению)
+    Скрипт: Визуальное вращение персонажа (НЕ мешает бегу)
     Управление: Клавиша X (Вкл/Выкл)
 --]]
 
@@ -10,12 +10,64 @@ local Players = game:GetService("Players")
 local player = Players.LocalPlayer
 local camera = workspace.CurrentCamera
 
-local isSpinning = true
-local ROTATION_SPEED = 5 -- оборотов в секунду
+local isSpinning = false
+local ROTATION_SPEED = 8 -- оборотов в секунду (можно менять)
 local spinConnection = nil
 
--- Сохраняем исходный CFrame камеры и тела
-local originalCameraCF = nil
+-- Эффекты вращения (чисто визуальные)
+local function startSpin()
+    if spinConnection then 
+        spinConnection:Disconnect()
+        spinConnection = nil
+    end
+    
+    isSpinning = true
+    
+    spinConnection = RunService.RenderStepped:Connect(function(deltaTime)
+        if not isSpinning then return end
+        
+        local character = player.Character
+        if not character then return end
+        
+        -- Получаем части тела для визуального вращения
+        local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+        local humanoid = character:FindFirstChild("Humanoid")
+        
+        if not humanoidRootPart or not humanoid then return end
+        
+        -- СПОСОБ 1: Вращаем ТОЛЬКО визуальный угол (не трогаем CFrame)
+        -- Это не влияет на физику и движение!
+        local rotationAngle = (ROTATION_SPEED * deltaTime * 360) % 360
+        
+        -- Применяем вращение только к Orientation (визуалка)
+        -- ВНИМАНИЕ: Это не сломает движение, так как CFrame остаётся нетронутым
+        local currentOrientation = humanoidRootPart.Orientation
+        humanoidRootPart.Orientation = Vector3.new(
+            currentOrientation.X,
+            (currentOrientation.Y + (ROTATION_SPEED * deltaTime * 360)) % 360,
+            currentOrientation.Z
+        )
+        
+        -- Дополнительно: вращаем все конечности для эффекта
+        local limbs = {
+            "UpperTorso", "LowerTorso", "Head",
+            "LeftUpperArm", "RightUpperArm",
+            "LeftLowerArm", "RightLowerArm"
+        }
+        
+        for _, limbName in pairs(limbs) do
+            local limb = character:FindFirstChild(limbName)
+            if limb and limb:IsA("BasePart") then
+                local limbOrientation = limb.Orientation
+                limb.Orientation = Vector3.new(
+                    limbOrientation.X,
+                    (limbOrientation.Y + (ROTATION_SPEED * deltaTime * 360)) % 360,
+                    limbOrientation.Z
+                )
+            end
+        end
+    end)
+end
 
 local function stopSpin()
     if spinConnection then
@@ -23,74 +75,28 @@ local function stopSpin()
         spinConnection = nil
     end
     isSpinning = false
-end
-
-local function startSpin()
-    if spinConnection then stopSpin() end
-    isSpinning = true
     
-    spinConnection = RunService.Heartbeat:Connect(function(deltaTime)
-        if not isSpinning then return end
-        
-        local character = player.Character
-        if not character then return end
-        
-        local rootPart = character:FindFirstChild("HumanoidRootPart")
-        local humanoid = character:FindFirstChild("Humanoid")
-        if not rootPart or not humanoid then return end
-        
-        -- Получаем текущее движение (WASD)
-        local moveDirection = humanoid.MoveDirection
-        local isMoving = moveDirection.Magnitude > 0.01
-        
-        -- Сохраняем текущую позицию
-        local currentPosition = rootPart.Position
-        
-        -- Вычисляем угол поворота
-        local rotationAngle = ROTATION_SPEED * deltaTime * 360
-        local rotationRadians = math.rad(rotationAngle)
-        
-        -- Получаем текущий CFrame камеры для сохранения направления движения
-        local cameraCF = camera.CFrame
-        
-        -- Вращаем корневую часть (HumanoidRootPart)
-        rootPart.CFrame = rootPart.CFrame * CFrame.Angles(0, rotationRadians, 0)
-        
-        -- ВАЖНО: Сохраняем позицию, чтобы персонаж не улетал
-        
-        -- КОСТЫЛЬ ДЛЯ SHIFT LOCK:
-        -- Принудительно обновляем направление камеры, но не даём ей сбивать вращение тела
-        if isMoving then
-            -- Получаем направление движения относительно камеры (как в обычной игре)
-            local cameraForward = cameraCF.LookVector
-            local cameraRight = cameraCF.RightVector
-            
-            -- Нормализуем направление движения от WASD
-            local moveX = moveDirection.X
-            local moveZ = moveDirection.Z
-            
-            -- Вычисляем новое направление движения в мировых координатах
-            local worldDirection = (cameraForward * moveZ) + (cameraRight * moveX)
-            worldDirection = Vector3.new(worldDirection.X, 0, worldDirection.Z).Unit
-            
-            if worldDirection.Magnitude > 0.01 then
-                -- Поворачиваем персонажа в сторону движения (как в обычной игре)
-                local targetAngle = math.atan2(worldDirection.X, worldDirection.Z)
-                local currentAngle = rootPart.Orientation.Y
-                
-                -- Плавный поворот (опционально, можно убрать для резкого)
-                -- rootPart.CFrame = CFrame.new(rootPart.Position) * CFrame.Angles(0, targetAngle, 0)
-                
-                -- Для более плавного поворота при движении:
-                local newAngle = currentAngle + (rotationRadians * 180 / math.pi)
-                rootPart.CFrame = CFrame.new(rootPart.Position) * CFrame.Angles(0, math.rad(newAngle), 0)
-            end
+    -- Сбрасываем вращение частей тела обратно в ноль (опционально)
+    local character = player.Character
+    if character then
+        local humanoidRootPart = character:FindFirstChild("HumanoidRootPart")
+        if humanoidRootPart then
+            humanoidRootPart.Orientation = Vector3.new(0, 0, 0)
         end
         
-        -- Обновляем HumanoidRootPart позицию (фикс для джиттера)
-        rootPart.Velocity = Vector3.new(0, rootPart.Velocity.Y, 0)
-        rootPart.RotVelocity = Vector3.new(0, 0, 0)
-    end)
+        local limbs = {
+            "UpperTorso", "LowerTorso", "Head",
+            "LeftUpperArm", "RightUpperArm",
+            "LeftLowerArm", "RightLowerArm"
+        }
+        
+        for _, limbName in pairs(limbs) do
+            local limb = character:FindFirstChild(limbName)
+            if limb and limb:IsA("BasePart") then
+                limb.Orientation = Vector3.new(0, 0, 0)
+            end
+        end
+    end
 end
 
 -- Обработка нажатия X
@@ -100,19 +106,23 @@ UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if input.KeyCode == Enum.KeyCode.X then
         if isSpinning then
             stopSpin()
-            print("Вращение ОСТАНОВЛЕНО")
+            print("❌ Вращение ОСТАНОВЛЕНО")
         else
             startSpin()
-            print("Вращение ЗАПУЩЕНО (Скорость: " .. ROTATION_SPEED .. " об/сек)")
-            print("Shift Lock не мешает, движение работает нормально")
+            print("✅ Вращение ЗАПУЩЕНО (Скорость: " .. ROTATION_SPEED .. " об/сек)")
+            print("🏃 Теперь можно БЕГАТЬ и вращаться одновременно!")
         end
     end
 end)
 
--- Пересоздание персонажа
-player.CharacterAdded:Connect(function(newCharacter)
+-- Если персонаж пересоздаётся
+player.CharacterAdded:Connect(function()
     stopSpin()
     isSpinning = false
 end)
 
-print("✅ Скрипт загружен! Нажми X для вращения (работает с Shift Lock)")
+print("=":rep(40))
+print("🎡 СКРИПТ ВРАЩЕНИЯ ЗАГРУЖЕН")
+print("📌 Нажми X чтобы начать/остановить вращение")
+print("🏃 Движение и бег РАБОТАЮТ во время вращения")
+print("=":rep(40))
