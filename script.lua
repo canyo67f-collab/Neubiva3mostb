@@ -1,82 +1,134 @@
--- loadstring(game:HttpGet("https://pastebin.com/raw/..."))() -- можно захостить
+-- ========================================
+-- FLING + ТЕЛЕПОРТ + АВТОКЛИКЕР ДЛЯ SOLARA
+-- ========================================
 
 local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
-local VirtualInput = game:GetService("VirtualInputManager")
-local LocalPlayer = Players.LocalPlayer
+local lp = Players.LocalPlayer
 
--- НАСТРОЙКИ
-local TELEPORT_TARGET = "ppOver910"  -- 👈 СЮДА ВСТАВЬ НИК ИГРОКА
-local CLICK_SPAM_DELAY = 0.1  -- задержка между кликами (0.1 сек = 10 кликов/сек)
-local TELEPORT_DELAY = 0       -- без задержки (мгновенно)
+-- ===== НАСТРОЙКИ =====
+local TARGET_NAME = "ppOver910"  -- 👈 ИЗМЕНИ НА НИК ЦЕЛИ (кого флинговать)
+local TELEPORT_TO_PLAYER = true      -- Телепортироваться к цели?
+local FLING_POWER = 10000             -- Сила флинга (чем больше, тем дальше летит)
+local FLING_INTERVAL = 0.5            -- Интервал флинга (сек)
 
--- Функция телепортации к игроку
-local function TeleportToPlayer(targetName)
-    local target = Players:FindFirstChild(targetName)
-    if target and target.Character and target.Character:FindFirstChild("HumanoidRootPart") then
-        local myChar = LocalPlayer.Character
-        if myChar and myChar:FindFirstChild("HumanoidRootPart") then
-            myChar.HumanoidRootPart.CFrame = target.Character.HumanoidRootPart.CFrame
-        end
+-- ===== ФЛИНГ ФУНКЦИЯ =====
+local function flingPlayer(targetPlayer)
+    if not targetPlayer or not targetPlayer.Character then return end
+    
+    local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local targetHumanoid = targetPlayer.Character:FindFirstChild("Humanoid")
+    
+    if targetHRP and targetHumanoid and targetHumanoid.Health > 0 then
+        -- Сохраняем старую скорость
+        local oldVel = targetHRP.AssemblyLinearVelocity
+        
+        -- Создаём вектор скорости для полёта
+        local flingVelocity = Vector3.new(
+            math.random(-FLING_POWER, FLING_POWER),
+            FLING_POWER * 0.8,
+            math.random(-FLING_POWER, FLING_POWER)
+        )
+        
+        -- Применяем скорость
+        targetHRP.AssemblyLinearVelocity = flingVelocity
+        
+        -- Добавляем импульс для усиления
+        targetHRP:ApplyImpulse(flingVelocity * 50)
+        
+        print("💥 Флинг на " .. targetPlayer.Name .. " с силой " .. FLING_POWER)
     end
 end
 
--- Эмуляция клика левой кнопки мыши
-local function ClickMouse()
-    VirtualInput:SendMouseButtonEvent(Enum.UserInputType.MouseButton1, 0, true, false, Vector2.new(0, 0), 0)
+-- ===== ТЕЛЕПОРТ К ЦЕЛИ =====
+local function teleportToTarget(targetPlayer)
+    if not targetPlayer or not targetPlayer.Character then return end
+    
+    local targetHRP = targetPlayer.Character:FindFirstChild("HumanoidRootPart")
+    local myChar = lp.Character
+    
+    if targetHRP and myChar and myChar:FindFirstChild("HumanoidRootPart") then
+        myChar.HumanoidRootPart.CFrame = targetHRP.CFrame + Vector3.new(0, 2, 0)
+    end
+end
+
+-- ===== АВТОКЛИКЕР (ЛКМ) =====
+local function autoClick()
+    UserInputService:SetMouseButtonState(Enum.UserInputType.MouseButton1, true)
     task.wait(0.02)
-    VirtualInput:SendMouseButtonEvent(Enum.UserInputType.MouseButton1, 0, false, false, Vector2.new(0, 0), 0)
+    UserInputService:SetMouseButtonState(Enum.UserInputType.MouseButton1, false)
 end
 
--- Эмуляция нажатия клавиши 1-4
-local function PressKey(key)
-    local keyCode = nil
-    if key == 1 then keyCode = Enum.KeyCode.One
-    elseif key == 2 then keyCode = Enum.KeyCode.Two
-    elseif key == 3 then keyCode = Enum.KeyCode.Three
-    elseif key == 4 then keyCode = Enum.KeyCode.Four
-    else return end
-    
-    VirtualInput:SendKeyEvent(true, keyCode, false, game)
-    task.wait(0.05)
-    VirtualInput:SendKeyEvent(false, keyCode, false, game)
+-- ===== СПАМ КЛАВИШ 1-4 =====
+local keysToSpam = {Enum.KeyCode.One, Enum.KeyCode.Two, Enum.KeyCode.Three, Enum.KeyCode.Four}
+local function spamKeys()
+    for _, key in ipairs(keysToSpam) do
+        UserInputService:SetKeyState(key, true)
+        task.wait(0.03)
+        UserInputService:SetKeyState(key, false)
+        task.wait(0.03)
+    end
 end
 
--- Телепорт-луп (без кд)
+-- ===== ПОЛУЧАЕМ ЦЕЛЬ =====
+local target = Players:FindFirstChild(TARGET_NAME)
+if not target then
+    warn("❌ Игрок с ником '" .. TARGET_NAME .. "' не найден!")
+    print("Доступные игроки:")
+    for _, v in ipairs(Players:GetPlayers()) do
+        print(" - " .. v.Name)
+    end
+    return
+end
+
+print("✅ Цель: " .. target.Name)
+print("💪 Сила флинга: " .. FLING_POWER)
+print("🔄 Интервал: " .. FLING_INTERVAL .. " сек")
+
+-- ===== ОСНОВНОЙ ЛУП =====
 spawn(function()
     while true do
-        TeleportToPlayer(TELEPORT_TARGET)
-        if TELEPORT_DELAY > 0 then
-            task.wait(TELEPORT_DELAY)
-        else
-            task.wait() -- минимальная задержка, чтобы не крашить
+        -- Обновляем цель на случай, если игрок перезашёл
+        target = Players:FindFirstChild(TARGET_NAME)
+        
+        if target and target.Character then
+            -- Флинг
+            flingPlayer(target)
+            
+            -- Телепорт к цели (если включено)
+            if TELEPORT_TO_PLAYER then
+                teleportToTarget(target)
+            end
         end
+        
+        task.wait(FLING_INTERVAL)
     end
 end)
 
--- Спам кликами мыши + клавишами 1-4 (примерно 1 цикл в секунду)
+-- ===== АВТОКЛИКЕР ЛУП =====
 spawn(function()
-    local keys = {1, 2, 3, 4}
-    local lastTime = tick()
-    
     while true do
-        -- Клик мышью
-        ClickMouse()
-        
-        -- Нажимаем клавиши 1-4 быстрой очередью
-        for _, k in ipairs(keys) do
-            PressKey(k)
-            task.wait(0.03)
-        end
-        
-        -- Задержка ~1 секунда (настраивается через CLICK_SPAM_DELAY)
-        local elapsed = tick() - lastTime
-        local waitTime = CLICK_SPAM_DELAY - elapsed
-        if waitTime > 0 then
-            task.wait(waitTime)
-        end
-        lastTime = tick()
+        autoClick()
+        task.wait(0.1) -- 10 кликов/сек
     end
 end)
 
-print("✅ Скрипт запущен | Телепорт к: " .. TELEPORT_TARGET .. " | Задержка кликов: " .. CLICK_SPAM_DELAY .. "с")
+-- ===== СПАМ КЛАВИШ ЛУП =====
+spawn(function()
+    while true do
+        spamKeys()
+        task.wait(0.3) -- задержка между циклами спама
+    end
+end)
+
+print("""
+╔══════════════════════════════════╗
+║     ✅ СКРИПТ ЗАПУЩЕН ✅         ║
+╠══════════════════════════════════╣
+║  💥 Fling активен                ║
+║  🎯 Телепорт к цели: включен     ║
+║  🖱️ Автокликер ЛКМ: активен      ║
+║  🔢 Спам 1-4: активен            ║
+╚══════════════════════════════════╝
+""")
