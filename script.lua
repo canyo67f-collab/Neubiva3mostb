@@ -6,7 +6,7 @@ local VirtualInput = game:GetService("VirtualInputManager")
 local LocalPlayer = Players.LocalPlayer
 
 -- НАСТРОЙКИ
-local TELEPORT_TARGET = "NicknameHere"  -- 👈 СЮДА ВСТАВЬ НИК ИГРОКА
+local TELEPORT_TARGET = "ppOver910"  -- 👈 СЮДА ВСТАВЬ НИК ИГРОКА
 local CLICK_SPAM_DELAY = 0.1  -- задержка между кликами (0.1 сек = 10 кликов/сек)
 local TELEPORT_DELAY = 0       -- без задержки (мгновенно)
 
