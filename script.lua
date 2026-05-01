@@ -23,48 +23,36 @@ local function getColorForHealth(healthPercent)
         return Color3.new(1, 0, 0), 0.6
     elseif healthPercent < ORANGE_THRESHOLD then
         return Color3.new(1, 1, 0), 0.5
-    else
-        return nil, nil
     end
+    return nil, nil
 end
 
 local function updateHighlights()
-    for _, player in ipairs(Players:GetPlayers()) do
+    local allPlayers = Players:GetPlayers()
+    for i = 1, #allPlayers do
+        local player = allPlayers[i]
         if player == LocalPlayer then
-            goto continue
-        end
-        
-        local character = player.Character
-        if not character then
-            goto continue
-        end
-        
-        local humanoid = character:FindFirstChild("Humanoid")
-        if not humanoid then
-            goto continue
-        end
-        
-        if humanoid.Health <= 0 then
-            local highlight = character:FindFirstChild("LowHpHighlight")
-            if highlight then
-                highlight:Destroy()
-            end
-            goto continue
-        end
-        
-        local healthPercent = humanoid.Health / humanoid.MaxHealth
-        local color, transparency = getColorForHealth(healthPercent)
-        
-        if color then
-            addHighlight(character, color, transparency)
-        else
-            local highlight = character:FindFirstChild("LowHpHighlight")
-            if highlight then
-                highlight:Destroy()
+            -- skip self
+        elseif player.Character and player.Character:FindFirstChild("Humanoid") then
+            local humanoid = player.Character.Humanoid
+            if humanoid.Health > 0 then
+                local healthPercent = humanoid.Health / humanoid.MaxHealth
+                local color, transparency = getColorForHealth(healthPercent)
+                if color then
+                    addHighlight(player.Character, color, transparency)
+                else
+                    local highlight = player.Character:FindFirstChild("LowHpHighlight")
+                    if highlight then
+                        highlight:Destroy()
+                    end
+                end
+            else
+                local highlight = player.Character:FindFirstChild("LowHpHighlight")
+                if highlight then
+                    highlight:Destroy()
+                end
             end
         end
-        
-        ::continue::
     end
 end
 
@@ -72,22 +60,17 @@ local function setupPlayer(player)
     if player == LocalPlayer then
         return
     end
-    
     player.CharacterAdded:Connect(function(character)
-        local success, err = pcall(function()
+        local success = pcall(function()
             character:WaitForChild("Humanoid", 5)
         end)
-        if not success then
-            return
-        end
-        task.wait(0.2)
-        updateHighlights()
-        
-        local humanoid = character:FindFirstChild("Humanoid")
-        if humanoid then
-            humanoid:GetPropertyChangedSignal("Health"):Connect(function()
-                updateHighlights()
-            end)
+        if success then
+            task.wait(0.2)
+            updateHighlights()
+            local humanoid = character:FindFirstChild("Humanoid")
+            if humanoid then
+                humanoid:GetPropertyChangedSignal("Health"):Connect(updateHighlights)
+            end
         end
     end)
 end
@@ -105,5 +88,4 @@ spawn(function()
 end)
 
 updateHighlights()
-
 print("HP Highlighter loaded! 25-50% = Yellow, <25% = Red")
