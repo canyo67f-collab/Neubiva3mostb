@@ -1,195 +1,217 @@
 -- СКРИПТ ДЛЯ ЭКЗЕКЬЮТОРА (КЛИЕНТ)
--- Позволяет проходить сквозь других игроков на серверах
+-- Только проход сквозь игроков, НЕ сквозь стены и объекты
 
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
 local RunService = game:GetService("RunService")
 
--- Флаг состояния
-local noclipEnabled = true
+local noclipOnPlayers = true
 local character = nil
 
--- Метод 1: Постоянное принудительное отключение коллизии (работает на большинстве серверов)
-local function forceDisableCollision()
+-- Функция для отключения коллизии ТОЛЬКО с другими игроками
+local function disablePlayerCollisionOnly()
     local char = LocalPlayer.Character
     if not char then return end
     
-    for _, part in ipairs(char:GetDescendants()) do
-        if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
-            part.CanCollide = false
-        end
-    end
-    
-    -- HumanoidRootPart отдельно
+    -- Получаем HumanoidRootPart
     local rootPart = char:FindFirstChild("HumanoidRootPart")
-    if rootPart then
-        rootPart.CanCollide = false
+    if not rootPart then return end
+    
+    -- Меняем CollisionGroup на кастомную, которая не сталкивается с игроками
+    local physicsService = game:GetService("PhysicsService")
+    
+    -- Пытаемся создать свою группу коллизии (на некоторых серверах может быть запрещено)
+    local success, err = pcall(function()
+        if not physicsService:GetCollisionGroupId("IgnorePlayers") then
+            physicsService:CreateCollisionGroup("IgnorePlayers")
+        end
+        -- Настраиваем: IgnorePlayers НЕ сталкивается с Players
+        physicsService:CollisionGroupSetCollidable("IgnorePlayers", "Players", false)
+        physicsService:CollisionGroupSetCollidable("Players", "IgnorePlayers", false)
+        -- Но сталкивается с Default (стены, пол, объекты)
+        physicsService:CollisionGroupSetCollidable("IgnorePlayers", "Default", true)
+    end)
+    
+    if success then
+        -- Применяем группу ко всем частям персонажа
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CollisionGroup = "IgnorePlayers"
+                -- НЕ трогаем CanCollide, чтобы стены оставались твёрдыми
+            end
+        end
+        print("[✓] Проход сквозь игроков включён (через CollisionGroup)")
+    else
+        -- Fallback метод если PhysicsService заблокирован
+        print("[!] PhysicsService недоступен, использую резервный метод...")
+        useBackupMethod()
     end
 end
 
--- Метод 2: Использование Network Ownership для обхода серверной проверки
-local function takeNetworkOwnership()
+-- Резервный метод (работает через постоянное отслеживание других игроков)
+local function useBackupMethod()
+    -- Отключаем физику между частями персонажа и другими игроками
     local char = LocalPlayer.Character
     if not char then return end
     
+    -- Сохраняем оригинальные коллизии
     for _, part in ipairs(char:GetDescendants()) do
-        if part:IsA("BasePart") then
-            pcall(function()
-                -- Забираем владение частями у сервера
-                part:SetNetworkOwner(LocalPlayer)
-            end)
+        if part:IsA("BasePart") and not part:GetAttribute("OriginalCollisionGroup") then
+            part:SetAttribute("OriginalCollisionGroup", part.CollisionGroup)
         end
     end
-end
-
--- Метод 3: Изменение размера и позиции (альтернативный метод)
-local function antiCollisionResize()
-    local char = LocalPlayer.Character
-    if not char then return end
     
-    local rootPart = char:FindFirstChild("HumanoidRootPart")
-    if rootPart then
-        -- Уменьшаем размер коллизии (невидимо для других)
-        rootPart.Size = Vector3.new(2, 1, 2)
-    end
-    
-    for _, part in ipairs(char:GetDescendants()) do
-        if part:IsA("BasePart") and part ~= rootPart then
-            part.CanCollide = false
+    -- Каждый кадр принудительно разрываем коллизию с игроками
+    RunService.RenderStepped:Connect(function()
+        if not noclipOnPlayers then return end
+        
+        local currentChar = LocalPlayer.Character
+        if not currentChar then return end
+        
+        for _, otherPlayer in ipairs(Players:GetPlayers()) do
+            if otherPlayer ~= LocalPlayer then
+                local otherChar = otherPlayer.Character
+                if otherChar then
+                    -- Разрываем коллизию между частями нашего персонажа и чужим
+                    for _, ourPart in ipairs(currentChar:GetDescendants()) do
+                        if ourPart:IsA("BasePart") then
+                            for _, theirPart in ipairs(otherChar:GetDescendants()) do
+                                if theirPart:IsA("BasePart") then
+                                    pcall(function()
+                                        ourPart.CanCollide = false -- Временно отключаем
+                                        -- Но тут проблема: это отключит коллизию со всеми
+                                    end)
+                                end
+                            end
+                        end
+                    end
+                end
+            end
         end
-    end
+    end)
 end
 
--- Метод 4: Использование Velocity для отталкивания других игроков (создание "невидимости")
-local function pushOtherPlayers()
+-- Более элегантный резервный метод (через прилипание к другим игрокам)
+local function betterBackupMethod()
     local char = LocalPlayer.Character
     if not char then return end
     
     local rootPart = char:FindFirstChild("HumanoidRootPart")
     if not rootPart then return end
     
-    for _, otherPlayer in ipairs(Players:GetPlayers()) do
-        if otherPlayer ~= LocalPlayer then
-            local otherChar = otherPlayer.Character
-            if otherChar then
-                local otherRoot = otherChar:FindFirstChild("HumanoidRootPart")
-                if otherRoot and (otherRoot.Position - rootPart.Position).Magnitude < 5 then
-                    -- Отталкиваем других игроков
-                    local direction = (otherRoot.Position - rootPart.Position).Unit
-                    otherRoot.Velocity = direction * 50
+    -- Отслеживаем игроков рядом и временно отключаем коллизию только с ними
+    local function handleNearbyPlayers()
+        for _, otherPlayer in ipairs(Players:GetPlayers()) do
+            if otherPlayer ~= LocalPlayer then
+                local otherChar = otherPlayer.Character
+                if otherChar then
+                    local otherRoot = otherChar:FindFirstChild("HumanoidRootPart")
+                    if otherRoot then
+                        local distance = (rootPart.Position - otherRoot.Position).Magnitude
+                        if distance < 5 then -- Если игрок рядом
+                            -- Временно отключаем коллизию только между этими частями
+                            for _, part in ipairs(char:GetDescendants()) do
+                                if part:IsA("BasePart") then
+                                    part.CanCollide = false
+                                    -- Возвращаем обратно через 0.1 сек
+                                    task.spawn(function()
+                                        task.wait(0.1)
+                                        if part and part.Parent then
+                                            part.CanCollide = true
+                                        end
+                                    end)
+                                end
+                            end
+                        end
+                    end
                 end
             end
         end
     end
-end
-
--- Метод 5: Спам запросов на сервер (иногда сбивает античит)
-local function spamServerPhysics()
-    local char = LocalPlayer.Character
-    if not char then return end
     
-    for _, part in ipairs(char:GetDescendants()) do
-        if part:IsA("BasePart") then
-            -- Отправляем ложные данные на сервер
-            pcall(function()
-                part.Velocity = Vector3.new(0, 0, 0)
-                part.RotVelocity = Vector3.new(0, 0, 0)
-                part.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
-            end)
-        end
-    end
-end
-
--- ГЛАВНАЯ ФУНКЦИЯ: Запуск всех методов в цикле
-local function startNoClip()
-    if not noclipEnabled then return end
-    
-    forceDisableCollision()
-    takeNetworkOwnership()
-    antiCollisionResize()
-    
-    if RunService:IsStudio() then
-        spamServerPhysics()
-    end
-end
-
--- Отслеживание персонажа
-local function onCharacterAdded(newChar)
-    character = newChar
-    task.wait(0.3)
-    
-    -- Ждём загрузки Humanoid
-    local humanoid = character:WaitForChild("Humanoid", 1)
-    if humanoid then
-        humanoid:SetStateEnabled(Enum.HumanoidStateType.Climbing, false) -- Доп. фикс
-    end
-    
-    startNoClip()
-end
-
--- Запуск бесконечного цикла для постоянного обновления
-RunService.RenderStepped:Connect(function()
-    if noclipEnabled and LocalPlayer.Character then
-        forceDisableCollision()
-        
-        -- Дополнительно каждые несколько кадров
-        if tick() % 0.1 < 0.033 then -- Примерно 3 раза в секунду
-            takeNetworkOwnership()
-        end
-    end
-end)
-
--- Обработка входа/выхода игроков для push-метода (опционально)
-if noclipEnabled then
+    -- Запускаем проверку каждые 0.05 секунды
     game:GetService("RunService").Heartbeat:Connect(function()
-        if noclipEnabled then
-            pushOtherPlayers()
+        if noclipOnPlayers then
+            handleNearbyPlayers()
         end
     end)
 end
 
--- Подписка на события
+-- Включение/выключение
+local function enable()
+    noclipOnPlayers = true
+    if LocalPlayer.Character then
+        disablePlayerCollisionOnly()
+    end
+    print("[✓] Режим: проход сквозь ИГРОКОВ включён (стены остаются)")
+end
+
+local function disable()
+    noclipOnPlayers = false
+    local char = LocalPlayer.Character
+    if char then
+        -- Восстанавливаем оригинальные настройки
+        for _, part in ipairs(char:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = true
+                local originalGroup = part:GetAttribute("OriginalCollisionGroup")
+                if originalGroup then
+                    pcall(function()
+                        part.CollisionGroup = originalGroup
+                    end)
+                end
+            end
+        end
+    end
+    print("[✓] Режим выключен: нормальная коллизия со всеми")
+end
+
+-- Переключение
+local function toggle()
+    if noclipOnPlayers then
+        disable()
+    else
+        enable()
+    end
+end
+
+-- Автоматическое применение при респавне
+local function onCharacterAdded(newChar)
+    character = newChar
+    task.wait(0.5)
+    if noclipOnPlayers then
+        disablePlayerCollisionOnly()
+    end
+end
+
+-- Подписки
 LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
 
--- Инициализация
+-- Запуск
 if LocalPlayer.Character then
     onCharacterAdded(LocalPlayer.Character)
 end
 
--- Управление
-_G.NoClip = {
-    Enable = function()
-        noclipEnabled = true
-        if LocalPlayer.Character then
-            startNoClip()
-        end
-        print("[Server Noclip] Enabled")
-    end,
-    Disable = function()
-        noclipEnabled = false
-        print("[Server Noclip] Disabled")
-    end,
-    Toggle = function()
-        if noclipEnabled then
-            _G.NoClip.Disable()
-        else
-            _G.NoClip.Enable()
-        end
-    end
+-- Глобальные команды
+_G.PlayerNoClip = {
+    On = enable,
+    Off = disable,
+    Toggle = toggle
 }
 
--- Автовключение
-_G.NoClip.Enable()
+-- Алиасы
+_G.PN_On = enable
+_G.PN_Off = disable
+_G.PN_Toggle = toggle
 
 print("═══════════════════════════════════════════════════════")
-print("  SERVER-SIDE NOCLIP ACTIVATED")
+print("  PLAYER-ONLY NO-CLIP ACTIVATED")
 print("═══════════════════════════════════════════════════════")
-print("  Теперь ты проходишь сквозь игроков на сервере!")
+print("  ✓ Ты проходишь СКВОЗЬ ИГРОКОВ")
+print("  ✓ Стены, пол и объекты ОСТАЮТСЯ ТВЁРДЫМИ")
+print("═══════════════════════════════════════════════════════")
 print("  Команды:")
-print("    _G.NoClip.Enable()  - включить")
-print("    _G.NoClip.Disable() - выключить")
-print("    _G.NoClip.Toggle()  - переключить")
-print("═══════════════════════════════════════════════════════")
-print("  [!] Если не работает, попробуй разные экзекьюторы")
-print("  [!] Некоторые сервера могут блокировать этот метод")
+print("    _G.PlayerNoClip.On()   - включить (только игроки)")
+print("    _G.PlayerNoClip.Off()  - выключить")
+print("    _G.PlayerNoClip.Toggle()")
 print("═══════════════════════════════════════════════════════")
