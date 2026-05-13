@@ -1,90 +1,132 @@
--- Скрипт для отключения коллизии персонажа с другими игроками в Roblox
+-- Скрипт для отключения коллизии персонажа с другими игроками в Roblox (КЛИЕНТСКАЯ ВЕРСИЯ)
 -- Вставьте в экзекьютор и выполните
 
 local Players = game:GetService("Players")
 local LocalPlayer = Players.LocalPlayer
+local RunService = game:GetService("RunService")
 
--- Функция для отключения коллизии
+-- Переменные для отслеживания состояния
+local isNoClipEnabled = false
+local currentCharacter = nil
+
+-- Функция для отключения коллизии (простой метод через CanCollide)
 local function disableCollision()
     local character = LocalPlayer.Character
-    if not character or not character.Parent then return end
+    if not character or not character.Parent then 
+        warn("Персонаж не найден!")
+        return false 
+    end
     
-    -- Получаем HumanoidRootPart игрока
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return end
+    currentCharacter = character
     
-    -- Изменяем CanCollide и другие свойства для прохода сквозь игроков
-    rootPart.CanCollide = false
-    
-    -- Проходим по всем частям тела
+    -- Проходим по всем частям тела и отключаем CanCollide
+    local partsCount = 0
     for _, part in ipairs(character:GetDescendants()) do
         if part:IsA("BasePart") then
+            -- Сохраняем оригинальное состояние если нужно (опционально)
+            if part:GetAttribute("OriginalCanCollide") == nil then
+                part:SetAttribute("OriginalCanCollide", part.CanCollide)
+            end
             part.CanCollide = false
-            -- Дополнительно отключаем масс-коллизию с другими игроками
-            part.CollisionGroup = "Debris"
+            partsCount = partsCount + 1
         end
     end
     
-    -- Настройка CollisionGroup для прохода сквозь игроков
-    -- Проверяем существует ли группа, если нет - создаём
-    local success, collisionGroup = pcall(function()
-        return game:GetService("PhysicsService"):GetCollisionGroupId("NoPlayerCollision") 
-    end)
-    
-    if not success then
-        game:GetService("PhysicsService"):CreateCollisionGroup("NoPlayerCollision")
-    end
-    
-    -- Устанавливаем, что группа NoPlayerCollision не сталкивается с группой Players
-    local physicsService = game:GetService("PhysicsService")
-    pcall(function()
-        physicsService:CollisionGroupSetCollidable("NoPlayerCollision", "Players", false)
-        physicsService:CollisionGroupSetCollidable("Players", "NoPlayerCollision", false)
-    end)
-    
-    -- Применяем группу ко всем частям персонажа
-    for _, part in ipairs(character:GetDescendants()) do
-        if part:IsA("BasePart") then
-            part.CollisionGroup = "NoPlayerCollision"
-        end
-    end
-    
-    print("Коллизия отключена! Ты можешь проходить сквозь других игроков.")
+    isNoClipEnabled = true
+    print("[✓] Коллизия отключена! Ты проходишь сквозь других игроков. (обработано частей: " .. partsCount .. ")")
+    return true
 end
 
--- Функция для включения обратно (опционально)
+-- Функция для включения коллизии обратно
 local function enableCollision()
-    local character = LocalPlayer.Character
-    if not character or not character.Parent then return end
-    
-    for _, part in ipairs(character:GetDescendants()) do
-        if part:IsA("BasePart") then
-            part.CanCollide = true
-            part.CollisionGroup = "Players"
+    if not currentCharacter or not currentCharacter.Parent then
+        currentCharacter = LocalPlayer.Character
+        if not currentCharacter then
+            warn("Персонаж не найден!")
+            return false
         end
     end
     
-    print("Коллизия восстановлена.")
+    local partsCount = 0
+    for _, part in ipairs(currentCharacter:GetDescendants()) do
+        if part:IsA("BasePart") then
+            local originalValue = part:GetAttribute("OriginalCanCollide")
+            if originalValue ~= nil then
+                part.CanCollide = originalValue
+            else
+                part.CanCollide = true  -- Значение по умолчанию
+            end
+            partsCount = partsCount + 1
+        end
+    end
+    
+    isNoClipEnabled = false
+    print("[✓] Коллизия восстановлена! (обработано частей: " .. partsCount .. ")")
+    return true
 end
 
--- Следим за пересозданием персонажа (при смерти и т.д.)
+-- Автоматическое применение при появлении персонажа (после смерти/респавна)
 local function onCharacterAdded(character)
-    -- Небольшая задержка для корректной загрузки персонажа
+    -- Ждём, пока персонаж полностью загрузится
+    task.wait(0.5)
+    
+    -- Если ноклип был включён, применяем к новому персонажу
+    if isNoClipEnabled then
+        task.wait(0.2) -- Небольшая дополнительная задержка
+        disableCollision()
+    else
+        currentCharacter = character
+    end
+end
+
+-- Обработчик изменения персонажа (для случаев, когда персонаж удаляется)
+local function onCharacterRemoving(character)
+    if character == currentCharacter then
+        currentCharacter = nil
+    end
+end
+
+-- Подписываемся на события
+LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+LocalPlayer.CharacterRemoving:Connect(onCharacterRemoving)
+
+-- Если персонаж уже существует, применяем
+if LocalPlayer.Character then
+    task.wait(0.5)
+    disableCollision()
+else
+    -- Если персонажа ещё нет, ждём его появления
+    LocalPlayer.CharacterAdded:Wait()
     task.wait(0.5)
     disableCollision()
 end
 
--- Если персонаж уже существует, применяем сразу
-if LocalPlayer.Character then
-    disableCollision()
+-- Глобальные функции для управления
+_G.Noclip = {
+    On = disableCollision,
+    Off = enableCollision,
+    Toggle = function()
+        if isNoClipEnabled then
+            enableCollision()
+        else
+            disableCollision()
+        end
+    end,
+    IsEnabled = function() return isNoClipEnabled end
+}
+
+-- Удобные алиасы
+_G.NoClipOn = disableCollision
+_G.NoClipOff = enableCollision
+_G.NoClipToggle = function()
+    if isNoClipEnabled then enableCollision() else disableCollision() end
 end
 
--- Подписываемся на событие появления нового персонажа
-LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
-
-print("Скрипт активирован! Персонаж проходит сквозь других игроков.")
-print("Для восстановления коллизии используйте команду: enableCollision()")
-
--- Глобальные функции для управления из консоли экзекьютора
-_G.DisableNoClip = enableCollision
-_G.EnableNoClip = disableCollision
+print("═══════════════════════════════════════════════════════")
+print("  NOCLIP SCRIPT ACTIVATED (Client Version)")
+print("═══════════════════════════════════════════════════════")
+print("  Команды:")
+print("    _G.NoClipOn()     - включить проход сквозь игроков")
+print("    _G.NoClipOff()    - выключить проход сквозь игроков")
+print("    _G.NoClipToggle() - переключить режим")
+print("═══════════════════════════════════════════════════════")
