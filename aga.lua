@@ -1,48 +1,54 @@
--- Solara Script: Reverse Runner для Evade
--- Персонаж бежит спиной вперёд, сохраняя нормальную скорость
+-- Solara Script: Evade - Бег спиной вперёд (камера не трогается)
+-- Нажимаешь W - персонаж бежит вперёд, но развёрнут лицом к тебе
 
 local Players = game:GetService("Players")
-local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 local character = nil
 local humanoid = nil
 local rootPart = nil
 
--- Функция обновления персонажа
+-- Обновление персонажа
 local function updateCharacter()
     character = player.Character
     if character then
         humanoid = character:FindFirstChild("Humanoid")
         rootPart = character:FindFirstChild("HumanoidRootPart")
+        if humanoid then
+            humanoid.AutoRotate = false -- Отключаем авто-поворот
+        end
     end
 end
 
-player.CharacterAdded:Connect(function()
-    updateCharacter()
-end)
+player.CharacterAdded:Connect(updateCharacter)
 updateCharacter()
 
--- Включаем/выключаем режим (клавиша R)
-local reverseMode = false
+local reverseMode = true -- Режим бега задом (поставь false чтобы выключить)
 
-UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    if input.KeyCode == Enum.KeyCode.R then
-        reverseMode = not reverseMode
-        if reverseMode then
-            -- Отключаем авто-поворот, который мешает
-            if humanoid then
-                humanoid.AutoRotate = false
-            end
-            print("✅ Режим бега задом ВКЛЮЧЕН")
-        else
-            if humanoid then
-                humanoid.AutoRotate = true
-            end
-            print("❌ Режим бега задом ВЫКЛЮЧЕН")
-        end
+-- Запоминаем направление движения
+local moveDirection = Vector3.zero
+
+-- Получаем направление от клавиш
+UserInputService.InputBegan:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.W then
+        moveDirection = Vector3.new(0, 0, -1)
+    elseif input.KeyCode == Enum.KeyCode.S then
+        moveDirection = Vector3.new(0, 0, 1)
+    elseif input.KeyCode == Enum.KeyCode.A then
+        moveDirection = Vector3.new(-1, 0, 0)
+    elseif input.KeyCode == Enum.KeyCode.D then
+        moveDirection = Vector3.new(1, 0, 0)
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.KeyCode == Enum.KeyCode.W or 
+       input.KeyCode == Enum.KeyCode.S or 
+       input.KeyCode == Enum.KeyCode.A or 
+       input.KeyCode == Enum.KeyCode.D then
+        moveDirection = Vector3.zero
     end
 end)
 
@@ -53,23 +59,34 @@ RunService.RenderStepped:Connect(function()
         return
     end
     
-    if reverseMode then
-        local moveDirection = humanoid.MoveDirection
+    if reverseMode and moveDirection.Magnitude > 0 then
+        -- Получаем направление камеры
+        local camera = workspace.CurrentCamera
+        local cameraCFrame = camera.CFrame
         
-        if moveDirection.Magnitude > 0.1 then
-            -- Получаем угол движения и разворачиваем на 180°
-            local targetAngle = math.atan2(moveDirection.X, moveDirection.Z)
-            local reversedAngle = targetAngle + math.pi
-            
-            -- Применяем поворот
-            rootPart.CFrame = CFrame.new(rootPart.Position) * CFrame.Angles(0, reversedAngle, 0)
-            
-            -- Сбрасываем скорость, если Evade её меняет
-            if humanoid.WalkSpeed < 16 then
-                humanoid.WalkSpeed = 16
-            end
-        end
+        -- Поворачиваем направление движения относительно камеры
+        local forwardDirection = cameraCFrame.LookVector
+        local rightDirection = cameraCFrame.RightVector
+        
+        local moveDir = (forwardDirection * -moveDirection.Z) + (rightDirection * moveDirection.X)
+        moveDir = moveDir.Unit
+        
+        -- Двигаем персонажа в этом направлении
+        humanoid:Move(moveDir, true)
+        
+        -- Разворачиваем модель строго против движения (спиной вперёд)
+        local targetAngle = math.atan2(moveDir.X, moveDir.Z)
+        local reversedAngle = targetAngle + math.pi -- +180 градусов
+        
+        rootPart.CFrame = CFrame.new(rootPart.Position) * CFrame.Angles(0, reversedAngle, 0)
+        
+        -- Скорость бега
+        humanoid.WalkSpeed = 20
+    else
+        -- Обычный режим
+        humanoid.AutoRotate = true
     end
 end)
 
-print("🎮 Evade Reverse Runner загружен! Нажми R для включения/выключения")
+print("🎮 Режим активен! Персонаж бежит спиной вперёд, камера не поворачивается")
+print("📌 W/A/S/D работают как обычно, но модель развёрнута к тебе лицом")
