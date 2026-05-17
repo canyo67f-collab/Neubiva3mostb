@@ -1,174 +1,67 @@
+-- Solara Script: Бег лицом назад (Backward Runner)
+-- Работает в любых Roblox играх
+
 local Players = game:GetService("Players")
-local LocalPlayer = Players.LocalPlayer
+local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 
-local noclipOnPlayers = true
-local character = nil
+local player = Players.LocalPlayer
+local character = player.Character or player.CharacterAdded:Wait()
+local humanoid = character:WaitForChild("Humanoid")
 
-local function disablePlayerCollisionOnly()
-    local char = LocalPlayer.Character
-    if not char then return end
-    
-    local rootPart = char:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return end
-    
-    local physicsService = game:GetService("PhysicsService")
+local isRunningBackwards = false
+local originalWalkSpeed = 16
 
-    local success, err = pcall(function()
-        if not physicsService:GetCollisionGroupId("IgnorePlayers") then
-            physicsService:CreateCollisionGroup("IgnorePlayers")
-        end
-        physicsService:CollisionGroupSetCollidable("IgnorePlayers", "Players", false)
-        physicsService:CollisionGroupSetCollidable("Players", "IgnorePlayers", false)
-        physicsService:CollisionGroupSetCollidable("IgnorePlayers", "Default", true)
-    end)
-    
-    if success then
-        for _, part in ipairs(char:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.CollisionGroup = "IgnorePlayers"
-            end
-        end
-        print("[✓] Проход сквозь игроков включён (через CollisionGroup)")
-    else
-        print("[!] PhysicsService недоступен, использую резервный метод...")
-        useBackupMethod()
-    end
-end
-
-local function useBackupMethod()
-    local char = LocalPlayer.Character
-    if not char then return end
-    
-    for _, part in ipairs(char:GetDescendants()) do
-        if part:IsA("BasePart") and not part:GetAttribute("OriginalCollisionGroup") then
-            part:SetAttribute("OriginalCollisionGroup", part.CollisionGroup)
-        end
-    end
-    
-    RunService.RenderStepped:Connect(function()
-        if not noclipOnPlayers then return end
-        
-        local currentChar = LocalPlayer.Character
-        if not currentChar then return end
-        
-        for _, otherPlayer in ipairs(Players:GetPlayers()) do
-            if otherPlayer ~= LocalPlayer then
-                local otherChar = otherPlayer.Character
-                if otherChar then
-                    for _, ourPart in ipairs(currentChar:GetDescendants()) do
-                        if ourPart:IsA("BasePart") then
-                            for _, theirPart in ipairs(otherChar:GetDescendants()) do
-                                if theirPart:IsA("BasePart") then
-                                    pcall(function()
-                                        ourPart.CanCollide = false
-                                    end)
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end)
-end
-
-local function betterBackupMethod()
-    local char = LocalPlayer.Character
-    if not char then return end
-    
-    local rootPart = char:FindFirstChild("HumanoidRootPart")
-    if not rootPart then return end
-    
-    local function handleNearbyPlayers()
-        for _, otherPlayer in ipairs(Players:GetPlayers()) do
-            if otherPlayer ~= LocalPlayer then
-                local otherChar = otherPlayer.Character
-                if otherChar then
-                    local otherRoot = otherChar:FindFirstChild("HumanoidRootPart")
-                    if otherRoot then
-                        local distance = (rootPart.Position - otherRoot.Position).Magnitude
-                        if distance < 5 then 
-                            for _, part in ipairs(char:GetDescendants()) do
-                                if part:IsA("BasePart") then
-                                    part.CanCollide = false
-                                    task.spawn(function()
-                                        task.wait(0.1)
-                                        if part and part.Parent then
-                                            part.CanCollide = true
-                                        end
-                                    end)
-                                end
-                            end
-                        end
-                    end
-                end
-            end
-        end
-    end
-    
-    game:GetService("RunService").Heartbeat:Connect(function()
-        if noclipOnPlayers then
-            handleNearbyPlayers()
-        end
-    end)
-end
-
-local function enable()
-    noclipOnPlayers = true
-    if LocalPlayer.Character then
-        disablePlayerCollisionOnly()
-    end
-end
-
-local function disable()
-    noclipOnPlayers = false
-    local char = LocalPlayer.Character
-    if char then
-        for _, part in ipairs(char:GetDescendants()) do
-            if part:IsA("BasePart") then
-                part.CanCollide = true
-                local originalGroup = part:GetAttribute("OriginalCollisionGroup")
-                if originalGroup then
-                    pcall(function()
-                        part.CollisionGroup = originalGroup
-                    end)
-                end
-            end
-        end
-    end
-end
-
-local function toggle()
-    if noclipOnPlayers then
-        disable()
-    else
-        enable()
-    end
-end
-
-local function onCharacterAdded(newChar)
+-- Функция для обновления персонажа (если он респавнится)
+player.CharacterAdded:Connect(function(newChar)
     character = newChar
-    task.wait(0.5)
-    if noclipOnPlayers then
-        disablePlayerCollisionOnly()
+    humanoid = character:WaitForChild("Humanoid")
+end)
+
+-- Отслеживание нажатия клавиши W (код Enum.KeyCode.W)
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    if input.KeyCode == Enum.KeyCode.W then
+        isRunningBackwards = true
     end
-end
+end)
 
-LocalPlayer.CharacterAdded:Connect(onCharacterAdded)
+UserInputService.InputEnded:Connect(function(input, gameProcessed)
+    if gameProcessed then return end
+    
+    if input.KeyCode == Enum.KeyCode.W then
+        isRunningBackwards = false
+        -- Возвращаем нормальную скорость и снимаем принудительный поворот
+        if humanoid then
+            humanoid.WalkSpeed = originalWalkSpeed
+        end
+    end
+end)
 
-if LocalPlayer.Character then
-    onCharacterAdded(LocalPlayer.Character)
-end
+-- Основной цикл (каждый кадр)
+RunService.RenderStepped:Connect(function()
+    if not character or not humanoid then return end
+    
+    local isMoving = humanoid.MoveDirection.Magnitude > 0
+    
+    if isRunningBackwards and isMoving then
+        -- Поворачиваем персонажа на 180 градусов
+        local currentCFrame = character:GetPivot()
+        local _, currentYaw = currentCFrame:ToOrientation()
+        
+        -- Получаем направление движения и разворачиваем
+        local moveDirection = humanoid.MoveDirection
+        local targetAngle = math.atan2(moveDirection.X, moveDirection.Z)
+        
+        character:SetPrimaryPartCFrame(CFrame.new(
+            currentCFrame.Position,
+            currentCFrame.Position + Vector3.new(math.sin(targetAngle), 0, math.cos(targetAngle))
+        ) * CFrame.Angles(0, math.pi, 0))
+        
+        -- Устанавливаем скорость бега
+        humanoid.WalkSpeed = originalWalkSpeed
+    end
+end)
 
-_G.PlayerNoClip = {
-    On = enable,
-    Off = disable,
-    Toggle = toggle
-}
-
-_G.PN_On = enable
-_G.PN_Off = disable
-_G.PN_Toggle = toggle
-
-print("Проверка нахуй")
+print("✅ Скрипт загружен! Нажми W, чтобы бежать лицом назад")
