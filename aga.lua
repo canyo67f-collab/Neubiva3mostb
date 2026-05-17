@@ -1,67 +1,75 @@
--- Solara Script: Бег лицом назад (Backward Runner)
--- Работает в любых Roblox играх
+-- Solara Script: Reverse Runner для Evade
+-- Персонаж бежит спиной вперёд, сохраняя нормальную скорость
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 
 local player = Players.LocalPlayer
-local character = player.Character or player.CharacterAdded:Wait()
-local humanoid = character:WaitForChild("Humanoid")
+local character = nil
+local humanoid = nil
+local rootPart = nil
 
-local isRunningBackwards = false
-local originalWalkSpeed = 16
+-- Функция обновления персонажа
+local function updateCharacter()
+    character = player.Character
+    if character then
+        humanoid = character:FindFirstChild("Humanoid")
+        rootPart = character:FindFirstChild("HumanoidRootPart")
+    end
+end
 
--- Функция для обновления персонажа (если он респавнится)
-player.CharacterAdded:Connect(function(newChar)
-    character = newChar
-    humanoid = character:WaitForChild("Humanoid")
+player.CharacterAdded:Connect(function()
+    updateCharacter()
 end)
+updateCharacter()
 
--- Отслеживание нажатия клавиши W (код Enum.KeyCode.W)
+-- Включаем/выключаем режим (клавиша R)
+local reverseMode = false
+
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
     if gameProcessed then return end
-    
-    if input.KeyCode == Enum.KeyCode.W then
-        isRunningBackwards = true
-    end
-end)
-
-UserInputService.InputEnded:Connect(function(input, gameProcessed)
-    if gameProcessed then return end
-    
-    if input.KeyCode == Enum.KeyCode.W then
-        isRunningBackwards = false
-        -- Возвращаем нормальную скорость и снимаем принудительный поворот
-        if humanoid then
-            humanoid.WalkSpeed = originalWalkSpeed
+    if input.KeyCode == Enum.KeyCode.R then
+        reverseMode = not reverseMode
+        if reverseMode then
+            -- Отключаем авто-поворот, который мешает
+            if humanoid then
+                humanoid.AutoRotate = false
+            end
+            print("✅ Режим бега задом ВКЛЮЧЕН")
+        else
+            if humanoid then
+                humanoid.AutoRotate = true
+            end
+            print("❌ Режим бега задом ВЫКЛЮЧЕН")
         end
     end
 end)
 
--- Основной цикл (каждый кадр)
+-- Основной цикл
 RunService.RenderStepped:Connect(function()
-    if not character or not humanoid then return end
+    if not character or not humanoid or not rootPart then
+        updateCharacter()
+        return
+    end
     
-    local isMoving = humanoid.MoveDirection.Magnitude > 0
-    
-    if isRunningBackwards and isMoving then
-        -- Поворачиваем персонажа на 180 градусов
-        local currentCFrame = character:GetPivot()
-        local _, currentYaw = currentCFrame:ToOrientation()
-        
-        -- Получаем направление движения и разворачиваем
+    if reverseMode then
         local moveDirection = humanoid.MoveDirection
-        local targetAngle = math.atan2(moveDirection.X, moveDirection.Z)
         
-        character:SetPrimaryPartCFrame(CFrame.new(
-            currentCFrame.Position,
-            currentCFrame.Position + Vector3.new(math.sin(targetAngle), 0, math.cos(targetAngle))
-        ) * CFrame.Angles(0, math.pi, 0))
-        
-        -- Устанавливаем скорость бега
-        humanoid.WalkSpeed = originalWalkSpeed
+        if moveDirection.Magnitude > 0.1 then
+            -- Получаем угол движения и разворачиваем на 180°
+            local targetAngle = math.atan2(moveDirection.X, moveDirection.Z)
+            local reversedAngle = targetAngle + math.pi
+            
+            -- Применяем поворот
+            rootPart.CFrame = CFrame.new(rootPart.Position) * CFrame.Angles(0, reversedAngle, 0)
+            
+            -- Сбрасываем скорость, если Evade её меняет
+            if humanoid.WalkSpeed < 16 then
+                humanoid.WalkSpeed = 16
+            end
+        end
     end
 end)
 
-print("✅ Скрипт загружен! Нажми W, чтобы бежать лицом назад")
+print("🎮 Evade Reverse Runner загружен! Нажми R для включения/выключения")
